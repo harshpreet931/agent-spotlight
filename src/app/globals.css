@@ -23,7 +23,7 @@
 }
 
 body {
-  background: #0f0f23;
+  background: transparent;
   color: var(--foreground);
   font-family: var(--font-sans), system-ui, sans-serif;
   font-feature-settings: "rlig" 1, "calt" 1;
