@@ -1,47 +1,134 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+
+interface Tool {
+  name: string;
+  description: string;
+  input_schema: any;
+}
+
+// Gemini API compatible tool definition
+interface GeminiTool {
+  functionDeclarations: Tool[];
+}
 
 export function Spotlight() {
   const [query, setQuery] = useState("");
   const [response, setResponse] = useState("");
   const [loading, setLoading] = useState(false);
+  const [tools, setTools] = useState<Tool[]>([]);
+  const [showTools, setShowTools] = useState(false);
+  const [history, setHistory] = useState<any[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (inputRef.current) {
       inputRef.current.focus();
     }
+    // Load tools from the backend
+    invoke<Tool[]>("list_tools")
+      .then(setTools)
+      .catch(console.error);
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
-    
+
     setLoading(true);
-    setResponse("");
+    setResponse(`Thinking...`);
+    
+    const currentHistory = [...history, { role: "user", parts: [{ text: query }] }];
+    setHistory(currentHistory);
 
     try {
+      // Transform tools to the format expected by the Gemini API
+      const geminiTools = tools.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.input_schema,
+      }));
+
+      // Initial call to the agent
       const res = await fetch("/api/agent", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query,
+          query: query,
+          tools: [{ functionDeclarations: geminiTools }],
+          history: currentHistory,
         }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        setResponse(data.response);
-      } else {
-        setResponse("An error occurred while processing your request.");
+      const agentResponse = await res.json();
+
+      if (agentResponse.type === "text") {
+        setResponse(agentResponse.response);
+        setHistory(prev => [...prev, { role: "model", parts: [{ text: agentResponse.response }] }]);
+      } else if (agentResponse.type === "tool_call") {
+        setResponse(`Calling tools: ${agentResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
+        
+        const toolResults = [];
+        for (const toolCall of agentResponse.tool_calls) {
+          try {
+            const result = await invoke("call_tool", {
+              serverName: "filesystem", // This needs to be dynamic
+              toolName: toolCall.name,
+              args: toolCall.args,
+            });
+            toolResults.push({
+              toolCall,
+              result,
+            });
+          } catch (e) {
+            toolResults.push({
+              toolCall,
+              result: { error: `Failed to execute tool ${toolCall.name}: ${e}` },
+            });
+          }
+        }
+
+        // Transform tools for the second call as well
+        const geminiTools = tools.map(tool => ({
+            name: tool.name,
+            description: tool.description,
+            parameters: tool.input_schema,
+        }));
+
+        // Send tool results back to the agent
+        const functionResponseParts = toolResults.map(tr => ({
+            functionResponse: {
+                name: tr.toolCall.name,
+                response: tr.result,
+            }
+        }));
+
+        const secondRes = await fetch("/api/agent", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              query: "Please summarize the results of the tool calls.", // A generic prompt to continue
+              tools: [{ functionDeclarations: geminiTools }],
+              history: [...currentHistory, { role: "model", parts: agentResponse.tool_calls.map((tc: any) => ({ functionCall: tc })) }, { role: "function", parts: functionResponseParts }]
+            }),
+        });
+
+        const finalAgentResponse = await secondRes.json();
+        if (finalAgentResponse.type === 'text') {
+            setResponse(finalAgentResponse.response);
+            setHistory(prev => [...prev, { role: "model", parts: [{ text: finalAgentResponse.response }] }]);
+        } else {
+            setResponse("Agent did not provide a final answer after tool call.");
+        }
       }
     } catch (error) {
-      setResponse("Network error. Please check your connection and try again.");
+      setResponse("An error occurred while processing your request.");
+      console.error(error);
     } finally {
       setLoading(false);
+      setQuery("");
     }
   };
 
@@ -56,8 +143,8 @@ export function Spotlight() {
     <div className="fixed inset-0 bg-black/20 backdrop-blur-sm flex items-start justify-center pt-[15vh] z-50">
       <div className="w-[600px] mx-4">
         {/* Spotlight Search Container */}
-        <div className="bg-white/95 backdrop-blur-xl rounded-xl shadow-2xl overflow-hidden border border-white/20">
-          <form onSubmit={handleSubmit}>
+        <div className="bg-white/95 backdrop-blur-xl rounded-xl shadow-2xl border border-white/20 flex flex-col max-h-[80vh]">
+          <form onSubmit={handleSubmit} className="flex-shrink-0">
             <div className="flex items-center px-6 py-4">
               {/* Search Icon */}
               <svg
@@ -96,32 +183,41 @@ export function Spotlight() {
             </div>
           </form>
 
-          {/* Results Container */}
-          {response && (
-            <div className="border-t border-gray-100">
-              <div className="px-6 py-4 hover:bg-blue-50/50 cursor-pointer transition-colors">
-                <div className="flex items-start gap-4">
-                  {/* Result Icon */}
-                  <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm">
-                    <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  
-                  {/* Result Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-base font-medium text-gray-900">AI Agent Response</h3>
-                      <span className="px-2 py-0.5 text-xs font-medium text-blue-600 bg-blue-100 rounded-full">
-                        Agent
-                      </span>
-                    </div>
-                    <p className="text-sm text-gray-600 leading-relaxed line-clamp-3">{response}</p>
-                  </div>
+          {/* Scrollable Content Area */}
+          <div className="overflow-y-auto flex-grow">
+            {/* Results Container */}
+            {response && (
+              <div className="border-t border-gray-100">
+                <div className="px-6 py-4">
+                  <pre className="text-sm text-gray-600 leading-relaxed whitespace-pre-wrap">{response}</pre>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+
+            {/* Tools List */}
+            {showTools && tools.length > 0 && (
+              <div className="border-t border-gray-100">
+                <div className="px-6 py-2">
+                  <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Available Tools</h4>
+                  <ul className="mt-2 text-sm text-gray-700">
+                    {tools.map(tool => (
+                      <li key={tool.name} className="py-1">- {tool.name}: {tool.description}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Tools Button */}
+        <div className="mt-3 text-center">
+          <button
+            onClick={() => setShowTools(!showTools)}
+            className="px-4 py-2 text-sm bg-white/20 rounded-md border border-white/30 text-white/70 hover:bg-white/30 transition-colors"
+          >
+            {showTools ? "Hide" : "Show"} Available Tools
+          </button>
         </div>
 
         {/* Hint text */}
