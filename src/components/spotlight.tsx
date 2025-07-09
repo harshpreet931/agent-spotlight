@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { FileText, Globe, Search, File, Folder } from 'lucide-react';
+import { FileText, Globe, Search, File, Folder, Settings, KeyRound } from 'lucide-react';
 
 // --- Type Definitions ---
 
@@ -44,12 +44,23 @@ export function Spotlight() {
   const [loading, setLoading] = useState(false);
   const [tools, setTools] = useState<Tool[]>([]);
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [apiKey, setApiKey] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
     invoke<Tool[]>("list_tools").then(setTools).catch(console.error);
+    const storedApiKey = localStorage.getItem("gemini_api_key");
+    if (storedApiKey) {
+      setApiKey(storedApiKey);
+    }
   }, []);
+
+  const handleSaveApiKey = () => {
+    localStorage.setItem("gemini_api_key", apiKey);
+    setShowSettings(false);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,6 +87,7 @@ export function Spotlight() {
           query,
           tools: [{ functionDeclarations: geminiTools }],
           history: currentHistory,
+          apiKey,
         }),
       });
 
@@ -203,6 +215,9 @@ export function Spotlight() {
                 className="flex-1 text-2xl text-gray-800 placeholder-gray-400 bg-transparent border-none outline-none"
                 disabled={loading}
               />
+              <button type="button" onClick={() => setShowSettings(!showSettings)} className="p-2 rounded-full hover:bg-gray-200">
+                <Settings className="w-5 h-5 text-gray-500" />
+              </button>
               {loading && (
                 <div className="ml-4">
                   <div className="animate-spin rounded-full h-5 w-5 border-2 border-gray-400 border-t-gray-700"></div>
@@ -210,6 +225,24 @@ export function Spotlight() {
               )}
             </div>
           </form>
+
+          {showSettings && (
+            <div className="px-5 py-4 border-t border-gray-200/80">
+              <div className="flex items-center">
+                <KeyRound className="w-5 h-5 text-gray-500 mr-3" />
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Enter your Gemini API Key"
+                  className="flex-1 text-base text-gray-800 placeholder-gray-400 bg-gray-100 rounded-md px-3 py-2 border-none outline-none"
+                />
+                <button onClick={handleSaveApiKey} className="ml-3 px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600">
+                  Save
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="overflow-y-auto flex-grow border-t border-gray-200/80">
             {results.length > 0 ? (

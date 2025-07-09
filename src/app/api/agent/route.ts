@@ -5,12 +5,17 @@ import {
   HarmBlockThreshold,
 } from "@google/generative-ai";
 
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
 export async function POST(req: NextRequest) {
   try {
-    const { query, tools, history } = await req.json();
+    const { query, tools, history, apiKey } = await req.json();
+
+    const key = apiKey || process.env.GOOGLE_API_KEY || "";
+    if (!key) {
+      return NextResponse.json({ error: "API key is missing" }, { status: 400 });
+    }
+
+    const genAI = new GoogleGenerativeAI(key);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     if (!query) {
       return NextResponse.json({ error: "Missing query" }, { status: 400 });
