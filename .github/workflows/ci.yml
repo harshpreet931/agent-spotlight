@@ -14,25 +14,24 @@ jobs:
         steps: 
             - uses: actions/checkout@v4
             
-            - name: Setup Node.js 
+            - name: setup node
               uses: actions/setup-node@v4
-              with: 
+              with:
                 node-version: 18
 
-            - name: Install Rust toolchain 
-              uses: actions-rs/toolchain@v1
-              with: 
-                toolchain: stable 
+            - name: install Rust stable
+              uses: dtolnay/rust-toolchain@stable
 
-            - name: Install Linux dependencies
+            - name: install dependencies (ubuntu only)
+              if: matrix.platform == 'ubuntu-22.04'
               run: |
                 sudo apt-get update
-                sudo apt-get install -y libwebkit2gtk-4.0-dev libjavascriptcoregtk-4.0-dev build-essential curl wget libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev
+                sudo apt-get install -y libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev build-essential curl wget libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
 
-            - name: Install frontend dependencies
+            - name: install frontend dependencies
               run: npm install 
 
-            - name: Build application
+            - name: build tauri app
+              uses: tauri-apps/tauri-action@v0
               env:
-                TAURI_WEBKIT2GTK_4_1: 'false'
-              run: npm run tauri build
+                GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
