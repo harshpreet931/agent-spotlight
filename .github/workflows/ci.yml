@@ -1,0 +1,36 @@
+name: CI 
+
+on: 
+    push:
+        branches:
+            [main]
+    pull_request:
+        branches:
+            [main]
+        
+jobs: 
+    build: 
+        runs-on: ubuntu-latest
+        steps: 
+            - uses: actions/checkout@v4
+            
+            - name: Setup Node.js 
+              uses: actions/setup-node@v4
+              with: 
+                node-version: 18
+
+            - name: Install Rust toolchain 
+              uses: actions-rs/toolchain@v1
+              with: 
+                toolchain: stable 
+
+            - name: Install Linux dependencies
+              run: |
+                sudo apt-get update
+                sudo apt-get install -y libwebkit2gtk-4.0-dev build-essential curl wget libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+
+            - name: Install frontend dependencies
+              run: npm install 
+
+            - name: Build application
+              run: npm run tauri build
