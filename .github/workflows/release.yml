@@ -48,5 +48,6 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_WEBKIT2GTK_4_1: 'false'
         with:
           releaseId: ${{ needs.create-release.outputs.id }}
