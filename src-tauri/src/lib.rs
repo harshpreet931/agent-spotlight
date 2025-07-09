@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::{Manager, State};
+use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 
 // --- MCP and JSON-RPC Structures ---
 
@@ -225,6 +226,30 @@ pub fn run() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![list_tools, call_tool])
         .setup(|app| {
+            let window = app.get_webview_window("main").unwrap();
+            #[cfg(target_os = "macos")]
+            apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, None)
+                .expect("Unsupported platform! 'apply_vibrancy' is only supported on macOS");
+
+            let window_ = window.clone();
+            app.handle()
+                .plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_shortcuts(["CmdOrCtrl+`"])
+                        .unwrap()
+                        .with_handler(move |_app, _shortcut, event| {
+                            if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                                if window_.is_visible().unwrap() {
+                                    window_.hide().unwrap();
+                                } else {
+                                    window_.show().unwrap();
+                                    window_.set_focus().unwrap();
+                                }
+                            }
+                        })
+                        .build(),
+                )
+                .unwrap();
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -232,7 +257,7 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            let app_handle = app.handle().clone();
+            let app_handle_clone = app.handle().clone();
             let app_state: State<AppState> = app.state();
             let clients_arc = app_state.mcp_clients.clone();
 
@@ -240,7 +265,7 @@ pub fn run() {
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(async {
-                    let clients = setup_mcp_servers(&app_handle).await;
+                    let clients = setup_mcp_servers(&app_handle_clone).await;
                     *clients_arc.lock().unwrap() = clients;
                 });
             });

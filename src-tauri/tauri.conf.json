@@ -15,12 +15,13 @@
         "title": "Agent Spotlight",
         "width": 600,
         "height": 400,
-        "resizable": false,
+        "resizable": true,
         "fullscreen": false,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
-        "center": true
+        "center": true,
+        "visible": true
       }
     ],
     "security": {
