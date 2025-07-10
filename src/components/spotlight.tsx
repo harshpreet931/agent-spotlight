@@ -10,6 +10,7 @@ interface Tool {
   name: string;
   description: string;
   input_schema: any;
+  server_name?: string; // Add server name to track which server provides this tool
 }
 
 interface HistoryItem {
@@ -27,6 +28,20 @@ type ResultItem =
   | { type: 'file'; content: FileSearchResult };
 
 // --- Helper Functions ---
+
+// Function to get the server name for a given tool
+const getServerNameForTool = (toolName: string, tools: Tool[]): string => {
+  const tool = tools.find(t => t.name === toolName);
+  if (tool?.server_name) {
+    return tool.server_name;
+  }
+  
+  // Fallback to 'filesystem' if no server name is found (for backward compatibility)
+  if (process.env.NODE_ENV === 'development') {
+    console.warn(`No server name found for tool ${toolName}, falling back to 'filesystem'`);
+  }
+  return 'filesystem';
+};
 
 // A simple function to get a file icon
 const getFileIcon = (path: string) => {
@@ -50,7 +65,48 @@ export function Spotlight() {
 
   useEffect(() => {
     inputRef.current?.focus();
-    invoke<Tool[]>("list_tools").then(setTools).catch(console.error);
+    
+    // Poll for tools until they're available
+    const checkTools = async (retryCount = 0, delay = 500) => {
+      const maxRetries = 10; // Maximum number of retry attempts
+      const maxDelay = 8000; // Maximum delay of 8 seconds
+      
+      try {
+        const availableTools = await invoke<Tool[]>("list_tools");
+        
+        // Only log in development to prevent sensitive data exposure
+        if (process.env.NODE_ENV === 'development') {
+          console.log("Available tools:", availableTools);
+        }
+        
+        if (availableTools.length > 0) {
+          setTools(availableTools);
+        } else if (retryCount < maxRetries) {
+          // Exponential backoff: double the delay each time, up to maxDelay
+          const nextDelay = Math.min(delay * 2, maxDelay);
+          setTimeout(() => checkTools(retryCount + 1, nextDelay), delay);
+        } else {
+          console.warn("Maximum retry attempts reached. Tools may not be available.");
+        }
+      } catch (error) {
+        if (process.env.NODE_ENV === 'development') {
+          console.error("Error fetching tools:", error);
+        } else {
+          console.error("Failed to fetch tools");
+        }
+        
+        // Retry with exponential backoff if we haven't exceeded max retries
+        if (retryCount < maxRetries) {
+          const nextDelay = Math.min(delay * 2, maxDelay);
+          setTimeout(() => checkTools(retryCount + 1, nextDelay), delay);
+        } else {
+          console.warn("Maximum retry attempts reached. Tools may not be available.");
+        }
+      }
+    };
+    
+    checkTools();
+    
     const storedApiKey = localStorage.getItem("gemini_api_key");
     if (storedApiKey) {
       setApiKey(storedApiKey);
@@ -66,6 +122,8 @@ export function Spotlight() {
     e.preventDefault();
     if (!query.trim()) return;
 
+    console.log("Current tools state:", tools); // Debug log
+
     setLoading(true);
     setStatus("Thinking...");
     setResults([]);
@@ -74,18 +132,27 @@ export function Spotlight() {
     setHistory(currentHistory);
 
     try {
-      const geminiTools = tools.map(tool => ({
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.input_schema,
-      }));
+      // Format tools correctly for Gemini
+      const geminiTools = tools.length > 0 ? [{
+        functionDeclarations: tools.map(tool => ({
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.input_schema || {
+            type: "object",
+            properties: {},
+            required: []
+          }
+        }))
+      }] : [];
+
+      console.log("Sending tools to Gemini:", JSON.stringify(geminiTools, null, 2)); // Debug log
 
       const res = await fetch("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           query,
-          tools: [{ functionDeclarations: geminiTools }],
+          tools: geminiTools,
           history: currentHistory,
           apiKey,
         }),
@@ -97,18 +164,32 @@ export function Spotlight() {
         setResults([{ type: 'text', content: agentResponse.response }]);
         setHistory(prev => [...prev, { role: "model", parts: [{ text: agentResponse.response }] }]);
       } else if (agentResponse.type === "tool_call") {
-        setStatus(`Calling tools: ${agentResponse.tool_calls.map((tc: any) => tc.name).join(', ')}`);
+        const toolNames = agentResponse.tool_calls.map((tc: any) => tc.name).join(', ');
+        setStatus(`Calling tools: ${toolNames}`);
         
         const toolResults = await Promise.all(agentResponse.tool_calls.map(async (toolCall: any) => {
           try {
+            // Dynamically determine the server name based on the tool
+            const serverName = getServerNameForTool(toolCall.name, tools);
+            
+            if (process.env.NODE_ENV === 'development') {
+              console.log(`Calling tool ${toolCall.name} on server ${serverName}`);
+            }
+            
             const result = await invoke("call_tool", {
-              serverName: "filesystem", // This should be dynamic based on the tool
+              serverName,
               toolName: toolCall.name,
               args: toolCall.args,
             });
             return { toolCall, result };
           } catch (e) {
-            return { toolCall, result: { error: `Failed to execute tool ${toolCall.name}: ${e}` } };
+            // Log detailed error information only in development
+            if (process.env.NODE_ENV === 'development') {
+              console.error(`Failed to execute tool ${toolCall.name}:`, e);
+            } else {
+              console.error(`Tool execution failed: ${toolCall.name}`);
+            }
+            return { toolCall, result: { error: `Failed to execute tool ${toolCall.name}` } };
           }
         }));
 
@@ -134,14 +215,15 @@ export function Spotlight() {
 
 
         // Send results back to the agent for a summary
-        setStatus("Summarizing...");
+        setStatus(`Summarizing results from: ${toolNames}`);
         const secondRes = await fetch("/api/agent", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               query: "Summarize the results. If they are files, just say you've found some files.",
-              tools: [{ functionDeclarations: geminiTools }],
-              history: newHistory
+              tools: geminiTools,
+              history: newHistory,
+              apiKey,
             }),
         });
 
@@ -252,6 +334,7 @@ export function Spotlight() {
             ) : (
               <div className="text-center py-12 text-gray-500">
                 <p>{status}</p>
+                <p className="text-sm mt-2">Tools available: {tools.length}</p>
               </div>
             )}
           </div>

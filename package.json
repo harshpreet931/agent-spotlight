@@ -1,6 +1,14 @@
 {
   "name": "agent-spotlight-app",
   "version": "0.1.0",
+  "description": "Desktop AI agent that gets stuff done - extensible, fast, and beautiful",
+  "keywords": ["ai", "agent", "desktop", "tauri", "mcp", "gemini", "spotlight", "productivity"],
+  "homepage": "https://github.com/harshpreet931/agent-spotlight",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harshpreet931/agent-spotlight.git"
+  },
+  "license": "MIT",
   "private": true,
   "scripts": {
     "dev": "next dev",

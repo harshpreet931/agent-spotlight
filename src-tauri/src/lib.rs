@@ -33,6 +33,7 @@ pub struct Tool {
     pub description: String,
     #[serde(rename = "inputSchema")]
     pub input_schema: Option<Value>,
+    pub server_name: Option<String>, // Add server name to track which server provides this tool
 }
 
 #[derive(Deserialize, Debug)]
@@ -84,7 +85,16 @@ struct McpServersConfig {
 #[tauri::command]
 fn list_tools(state: State<AppState>) -> Vec<Tool> {
     let clients = state.mcp_clients.lock().unwrap();
-    clients.values().flat_map(|client| client.tools.clone()).collect()
+    let mut all_tools = Vec::new();
+    
+    for (server_name, client) in clients.iter() {
+        for mut tool in client.tools.clone() {
+            tool.server_name = Some(server_name.clone());
+            all_tools.push(tool);
+        }
+    }
+    
+    all_tools
 }
 
 // This is a simplified placeholder. A real implementation needs robust request/response matching.
@@ -204,10 +214,13 @@ async fn setup_mcp_servers(app_handle: &tauri::AppHandle) -> HashMap<String, Mcp
             child.stdout = Some(reader.into_inner());
 
             clients.insert(
-                name,
+                name.clone(),
                 McpClient {
                     process: child,
-                    tools: list_tools_result.tools,
+                    tools: list_tools_result.tools.into_iter().map(|mut tool| {
+                        tool.server_name = Some(name.clone());
+                        tool
+                    }).collect(),
                 },
             );
         } else {
