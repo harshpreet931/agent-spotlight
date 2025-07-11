@@ -108,14 +108,12 @@ Currently, testing is primarily manual. We'd welcome contributions to add:
 
 - **Discussions**: Use GitHub Discussions for questions
 - **Issues**: Report bugs via GitHub Issues
-- **Discord**: [Join our community](https://discord.gg/agent-spotlight)
 
 ## 🏆 Recognition
 
 Contributors will be:
 - Listed in our README
 - Credited in release notes
-- Invited to our contributors' Discord channel
 - Given priority access to new features
 
 ## 📜 Code of Conduct
