@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { FileText, Globe, Search, File, Folder, Settings, KeyRound } from 'lucide-react';
+import { FileText, Globe, Search, File, Folder, Settings, KeyRound, Calculator } from 'lucide-react';
+import { evaluate } from 'mathjs';
 
 // --- Type Definitions ---
 
@@ -25,7 +26,8 @@ interface FileSearchResult {
 
 type ResultItem = 
   | { type: 'text'; content: string }
-  | { type: 'file'; content: FileSearchResult };
+  | { type: 'file'; content: FileSearchResult }
+  | { type: 'math'; content: string };
 
 // --- Helper Functions ---
 
@@ -62,6 +64,7 @@ export function Spotlight() {
   const [apiKey, setApiKey] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [mathResult, setMathResult] = useState<string | null>(null);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -113,6 +116,24 @@ export function Spotlight() {
     }
   }, []);
 
+  useEffect(() => {
+    if (query.trim().length > 0) {
+      try {
+        // Basic check to see if it's a math expression
+        if (/[0-9]/.test(query) && /[\+\-\*\/]/.test(query)) {
+          const result = evaluate(query);
+          setMathResult(result.toString());
+        } else {
+          setMathResult(null);
+        }
+      } catch (error) {
+        setMathResult(null);
+      }
+    } else {
+      setMathResult(null);
+    }
+  }, [query]);
+
   const handleSaveApiKey = () => {
     localStorage.setItem("gemini_api_key", apiKey);
     setShowSettings(false);
@@ -121,6 +142,14 @@ export function Spotlight() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!query.trim()) return;
+
+    // If there's a math result, handle it as a special case
+    if (mathResult) {
+      setResults([{ type: 'math', content: mathResult }]);
+      setQuery("");
+      setMathResult(null);
+      return;
+    }
 
     console.log("Current tools state:", tools); // Debug log
 
@@ -275,6 +304,18 @@ export function Spotlight() {
             </div>
           </div>
         );
+      case 'math':
+        return (
+          <div key={index} className="flex items-center px-6 py-3">
+            <div className="mr-4">
+              <Calculator className="w-8 h-8 text-green-500" />
+            </div>
+            <div className="flex-grow">
+              <p className="font-medium text-gray-800 text-lg">{item.content}</p>
+              <p className="text-sm text-gray-500">Result</p>
+            </div>
+          </div>
+        );
       default:
         return null;
     }
@@ -327,7 +368,11 @@ export function Spotlight() {
           )}
 
           <div className="overflow-y-auto flex-grow border-t border-gray-200/80">
-            {results.length > 0 ? (
+            {mathResult && results.length === 0 ? (
+              <div className="py-2">
+                {renderResultItem({ type: 'math', content: mathResult }, 0)}
+              </div>
+            ) : results.length > 0 ? (
               <div className="py-2">
                 {results.map(renderResultItem)}
               </div>

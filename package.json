@@ -2,7 +2,16 @@
   "name": "agent-spotlight-app",
   "version": "0.1.0",
   "description": "Desktop AI agent that gets stuff done - extensible, fast, and beautiful",
-  "keywords": ["ai", "agent", "desktop", "tauri", "mcp", "gemini", "spotlight", "productivity"],
+  "keywords": [
+    "ai",
+    "agent",
+    "desktop",
+    "tauri",
+    "mcp",
+    "gemini",
+    "spotlight",
+    "productivity"
+  ],
   "homepage": "https://github.com/harshpreet931/agent-spotlight",
   "repository": {
     "type": "git",
@@ -21,6 +30,7 @@
     "@google/generative-ai": "^0.24.1",
     "@tauri-apps/api": "^2.6.0",
     "lucide-react": "^0.525.0",
+    "mathjs": "^14.5.3",
     "next": "15.3.5",
     "openai": "^5.8.2",
     "react": "^19.0.0",
