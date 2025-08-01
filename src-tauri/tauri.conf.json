@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "Agent Spotlight",
-        "width": 600,
-        "height": 400,
+        "width": 800,
+        "height": 600,
         "resizable": true,
         "fullscreen": false,
         "decorations": false,
