@@ -188,9 +188,28 @@ async fn setup_mcp_servers(app_handle: &tauri::AppHandle) -> HashMap<String, Mcp
             stdin.write_all(payload.as_bytes()).unwrap();
 
             let mut line = String::new();
-            reader.read_line(&mut line).unwrap();
-            let _init_response: JsonRpcResponse = serde_json::from_str(&line).unwrap();
-            log::info!("Server '{}' initialized", name);
+            match reader.read_line(&mut line) {
+                Ok(_) => {
+                    if line.trim().is_empty() {
+                        log::error!("Server '{}' returned empty response for initialize", name);
+                        continue;
+                    }
+                    
+                    match serde_json::from_str::<JsonRpcResponse>(&line) {
+                        Ok(_init_response) => {
+                            log::info!("Server '{}' initialized", name);
+                        }
+                        Err(e) => {
+                            log::error!("Failed to parse initialize response from server '{}': {} (response: '{}')", name, e, line.trim());
+                            continue;
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to read initialize response from server '{}': {}", name, e);
+                    continue;
+                }
+            }
 
             // 2. List Tools
             let list_tools_request = JsonRpcRequest {
@@ -203,26 +222,63 @@ async fn setup_mcp_servers(app_handle: &tauri::AppHandle) -> HashMap<String, Mcp
             stdin.write_all(payload.as_bytes()).unwrap();
 
             line.clear();
-            reader.read_line(&mut line).unwrap();
-            let list_tools_response: JsonRpcResponse = serde_json::from_str(&line).unwrap();
-            let list_tools_result: ListToolsResult =
-                serde_json::from_value(list_tools_response.result.unwrap()).unwrap();
-            
-            log::info!("Found {} tools for server '{}'", list_tools_result.tools.len(), name);
+            match reader.read_line(&mut line) {
+                Ok(_) => {
+                    if line.trim().is_empty() {
+                        log::error!("Server '{}' returned empty response for tools/list", name);
+                        continue;
+                    }
+                    
+                    match serde_json::from_str::<JsonRpcResponse>(&line) {
+                        Ok(list_tools_response) => {
+                            match list_tools_response.result {
+                                Some(result) => {
+                                    match serde_json::from_value::<ListToolsResult>(result) {
+                                        Ok(list_tools_result) => {
+                                            log::info!("Found {} tools for server '{}'", list_tools_result.tools.len(), name);
+                                            
+                                            child.stdin = Some(stdin);
+                                            child.stdout = Some(reader.into_inner());
 
-            child.stdin = Some(stdin);
-            child.stdout = Some(reader.into_inner());
+                                            clients.insert(
+                                                name.clone(),
+                                                McpClient {
+                                                    process: child,
+                                                    tools: list_tools_result.tools.into_iter().map(|mut tool| {
+                                                        tool.server_name = Some(name.clone());
+                                                        tool
+                                                    }).collect(),
+                                                },
+                                            );
+                                        }
+                                        Err(e) => {
+                                            log::error!("Failed to parse tools list result for server '{}': {}", name, e);
+                                            continue;
+                                        }
+                                    }
+                                }
+                                None => {
+                                    if let Some(error) = list_tools_response.error {
+                                        log::error!("Server '{}' returned error for tools/list: {:?}", name, error);
+                                    } else {
+                                        log::error!("Server '{}' returned no result or error for tools/list", name);
+                                    }
+                                    continue;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Failed to parse JSON response from server '{}': {} (response: '{}')", name, e, line.trim());
+                            continue;
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to read response from server '{}': {}", name, e);
+                    continue;
+                }
+            }
 
-            clients.insert(
-                name.clone(),
-                McpClient {
-                    process: child,
-                    tools: list_tools_result.tools.into_iter().map(|mut tool| {
-                        tool.server_name = Some(name.clone());
-                        tool
-                    }).collect(),
-                },
-            );
         } else {
             log::error!("Failed to launch MCP server '{}'", name);
         }
