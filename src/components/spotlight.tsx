@@ -2,9 +2,10 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { FileText, Globe, Search, File, Folder, Settings, KeyRound, Calculator } from 'lucide-react';
+import { Search, Settings, KeyRound, Calculator } from 'lucide-react';
 import { useDebounce } from "@/hooks/useDebounce";
 import ResultItemComponent from "./ResultItem";
+import { getFileIcon } from '../utils/fileIcons';
 
 // --- Type Definitions ---
 
@@ -47,12 +48,6 @@ const getServerNameForTool = (toolName: string, tools: Tool[]): string => {
   return 'filesystem';
 };
 
-// A simple function to get a file icon
-const getFileIcon = (path: string) => {
-  if (path.endsWith('.app')) return <Globe className="w-8 h-8 text-blue-500" />;
-  if (path.endsWith('.txt')) return <FileText className="w-8 h-8 text-gray-500" />;
-  return <File className="w-8 h-8 text-gray-400" />;
-};
 
 // --- Main Component ---
 
@@ -164,7 +159,7 @@ export function Spotlight() {
 
     if (isMath && evaluatedMathResult) {
         setResults([{ type: 'math', content: evaluatedMathResult }]);
-        setQuery(evaluatedMathResult);
+        setQuery("");
         setMathResult(null); // Clear the debounced result
         return;
     }
@@ -205,8 +200,10 @@ export function Spotlight() {
 
       if (agentResponse.type === "text") {
         const responseText = agentResponse.response;
-        // Check if the response is a tool list
-        if (responseText.includes("I have the following tools available:")) {
+        // Check if the response contains a structured tool list
+        if (agentResponse.tools && Array.isArray(agentResponse.tools)) {
+          setResults([{ type: 'tool-list', content: agentResponse.tools }]);
+        } else if (responseText.includes("I have the following tools available:")) {
           const toolLines = responseText.replace('I have the following tools available: ', '').split('*').filter((line: string) => line.trim());
           const tools = toolLines.map((line: string) => {
             const [name, ...descriptionParts] = line.split(':');
