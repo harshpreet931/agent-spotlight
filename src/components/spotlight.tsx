@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { FileText, Globe, Search, File, Folder, Settings, KeyRound, Calculator } from 'lucide-react';
-import { evaluate } from 'mathjs';
+import { useDebounce } from "@/hooks/useDebounce";
+import ResultItemComponent from "./ResultItem";
 
 // --- Type Definitions ---
 
@@ -24,10 +25,11 @@ interface FileSearchResult {
   is_dir: boolean;
 }
 
-type ResultItem = 
+export type ResultItem =
   | { type: 'text'; content: string }
   | { type: 'file'; content: FileSearchResult }
-  | { type: 'math'; content: string };
+  | { type: 'math'; content: string }
+  | { type: 'tool-list'; content: { name: string; description: string }[] };
 
 // --- Helper Functions ---
 
@@ -65,6 +67,7 @@ export function Spotlight() {
   const [showSettings, setShowSettings] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const [mathResult, setMathResult] = useState<string | null>(null);
+  const debouncedQuery = useDebounce(query, 300);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -117,22 +120,25 @@ export function Spotlight() {
   }, []);
 
   useEffect(() => {
-    if (query.trim().length > 0) {
-      try {
-        // Basic check to see if it's a math expression
-        if (/[0-9]/.test(query) && /[\+\-\*\/]/.test(query)) {
-          const result = evaluate(query);
-          setMathResult(result.toString());
-        } else {
+    if (debouncedQuery.trim().length > 0) {
+      // Lazy load mathjs
+      import('mathjs').then(math => {
+        try {
+          // Basic check to see if it's a math expression
+          if (/[0-9]/.test(debouncedQuery) && /[\+\-\*\/]/.test(debouncedQuery)) {
+            const result = math.evaluate(debouncedQuery);
+            setMathResult(result.toString());
+          } else {
+            setMathResult(null);
+          }
+        } catch (error) {
           setMathResult(null);
         }
-      } catch (error) {
-        setMathResult(null);
-      }
+      });
     } else {
       setMathResult(null);
     }
-  }, [query]);
+  }, [debouncedQuery]);
 
   const handleSaveApiKey = () => {
     localStorage.setItem("gemini_api_key", apiKey);
@@ -143,15 +149,25 @@ export function Spotlight() {
     e.preventDefault();
     if (!query.trim()) return;
 
-    // If there's a math result, handle it as a special case
-    if (mathResult) {
-      setResults([{ type: 'math', content: mathResult }]);
-      setQuery("");
-      setMathResult(null);
-      return;
+    // Check for math directly on submit to avoid race condition with debounce
+    let evaluatedMathResult: string | null = null;
+    let isMath = false;
+    try {
+        if (/[0-9]/.test(query) && /[\+\-\*\/]/.test(query)) {
+            const math = await import('mathjs');
+            evaluatedMathResult = math.evaluate(query).toString();
+            isMath = true;
+        }
+    } catch (error) {
+        // Not a valid math expression
     }
 
-    console.log("Current tools state:", tools); // Debug log
+    if (isMath && evaluatedMathResult) {
+        setResults([{ type: 'math', content: evaluatedMathResult }]);
+        setQuery(evaluatedMathResult);
+        setMathResult(null); // Clear the debounced result
+        return;
+    }
 
     setLoading(true);
     setStatus("Thinking...");
@@ -174,8 +190,6 @@ export function Spotlight() {
         }))
       }] : [];
 
-      console.log("Sending tools to Gemini:", JSON.stringify(geminiTools, null, 2)); // Debug log
-
       const res = await fetch("/api/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -190,8 +204,22 @@ export function Spotlight() {
       const agentResponse = await res.json();
 
       if (agentResponse.type === "text") {
-        setResults([{ type: 'text', content: agentResponse.response }]);
-        setHistory(prev => [...prev, { role: "model", parts: [{ text: agentResponse.response }] }]);
+        const responseText = agentResponse.response;
+        // Check if the response is a tool list
+        if (responseText.includes("I have the following tools available:")) {
+          const toolLines = responseText.replace('I have the following tools available: ', '').split('*').filter((line: string) => line.trim());
+          const tools = toolLines.map((line: string) => {
+            const [name, ...descriptionParts] = line.split(':');
+            return {
+              name: name.trim().replace(/`/g, ''),
+              description: descriptionParts.join(':').trim()
+            };
+          });
+          setResults([{ type: 'tool-list', content: tools }]);
+        } else {
+          setResults([{ type: 'text', content: responseText }]);
+        }
+        setHistory(prev => [...prev, { role: "model", parts: [{ text: responseText }] }]);
       } else if (agentResponse.type === "tool_call") {
         const toolNames = agentResponse.tool_calls.map((tc: any) => tc.name).join(', ');
         setStatus(`Calling tools: ${toolNames}`);
@@ -282,44 +310,9 @@ export function Spotlight() {
     }
   };
 
-  const renderResultItem = (item: ResultItem, index: number) => {
-    switch (item.type) {
-      case 'text':
-        return (
-          <div key={index} className="px-6 py-3 text-gray-700 text-base">
-            {item.content}
-          </div>
-        );
-      case 'file':
-        const { path, is_dir } = item.content;
-        const fileName = path.split('/').pop();
-        return (
-          <div key={index} className="flex items-center px-6 py-3 hover:bg-gray-100 rounded-lg transition-colors duration-150 cursor-pointer">
-            <div className="mr-4">
-              {is_dir ? <Folder className="w-8 h-8 text-yellow-500" /> : getFileIcon(path)}
-            </div>
-            <div className="flex-grow">
-              <p className="font-medium text-gray-800">{fileName}</p>
-              <p className="text-sm text-gray-500">{path}</p>
-            </div>
-          </div>
-        );
-      case 'math':
-        return (
-          <div key={index} className="flex items-center px-6 py-3">
-            <div className="mr-4">
-              <Calculator className="w-8 h-8 text-green-500" />
-            </div>
-            <div className="flex-grow">
-              <p className="font-medium text-gray-800 text-lg">{item.content}</p>
-              <p className="text-sm text-gray-500">Result</p>
-            </div>
-          </div>
-        );
-      default:
-        return null;
-    }
-  };
+  const renderResultItem = useCallback((item: ResultItem, index: number) => {
+    return <ResultItemComponent key={index} item={item} index={index} />;
+  }, []);
 
   return (
     <div className="fixed inset-0 backdrop-blur-sm flex items-start justify-center pt-[20vh] z-50 font-sans">
